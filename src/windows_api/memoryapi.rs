@@ -6,7 +6,7 @@ use std::ffi::c_void;
 extern "C" {
     /// https://learn.microsoft.com/en-us/windows/win32/api/memoryapi/nf-memoryapi-readprocessmemory
     pub fn ReadProcessMemory(
-        h_process: isize,
+        h_process: usize,
         lp_base_address: *const c_void,
         lp_buffer: *mut c_void,
         n_size: usize,
@@ -15,7 +15,7 @@ extern "C" {
 
     /// https://learn.microsoft.com/en-us/windows/win32/api/memoryapi/nf-memoryapi-writeprocessmemory
     pub fn WriteProcessMemory(
-        h_process: isize,
+        h_process: usize,
         lp_base_address: *const c_void,
         lp_buffer: *const c_void,
         n_size: usize,

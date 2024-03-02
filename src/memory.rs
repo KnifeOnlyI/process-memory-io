@@ -4,6 +4,18 @@ use crate::process::Process;
 use crate::windows_api::errhandlingapi::GetLastError;
 use crate::windows_api::memoryapi::{ReadProcessMemory, WriteProcessMemory};
 
+/// Represent a multi-level pointer.
+///
+/// # Fields
+/// base_address - The base address of the pointer.
+/// offsets - The offsets to apply to the base address.
+/// struct_offset - The offset to apply to the final address (usefull to read a specific property of a struct).
+pub struct MultiLevelPointer {
+    pub base_address: usize,
+    pub offsets: Vec<usize>,
+    pub struct_offset: Option<usize>,
+}
+
 /// Read value at the specified address (ptr) from the process memory.
 ///
 /// # Arguments
@@ -37,6 +49,52 @@ pub fn read_process_memory(
     } else {
         Ok(lp_number_of_bytes_read)
     };
+}
+
+/// Read the value at the specified address (ptr) from the process memory.
+///
+/// # Arguments
+/// process - The process to read from.
+/// ptr - The address to read from.
+///
+/// # Returns
+/// If the function succeeds, the return value is the value read from the specified process.
+pub fn read<T>(process: &Process, ptr: *const c_void) -> Result<T, u32> {
+    let mut buffer: T = unsafe { std::mem::zeroed() };
+    let size = std::mem::size_of::<T>();
+
+    let r_read_process_memory =
+        read_process_memory(process, ptr, &mut buffer as *mut T as *mut c_void, size);
+
+    return if r_read_process_memory.is_err() {
+        Err(r_read_process_memory.unwrap_err())
+    } else {
+        Ok(buffer)
+    };
+}
+
+/// Read the value at the specified multi-level pointer from the process memory.
+///
+/// # Arguments
+/// process - The process to read from.
+/// mlp - The multi-level pointer to read from.
+///
+/// # Returns
+/// If the function succeeds, the return value is the value read from the specified process.
+pub fn read_multi_level_pointer<T>(process: &Process, mlp: &MultiLevelPointer) -> Result<T, u32> {
+    let mut ptr = read::<usize>(
+        &process,
+        (process.module_handle + mlp.base_address) as *const c_void,
+    )
+    .unwrap();
+
+    for i in 0..mlp.offsets.len() - 1 {
+        ptr = read::<usize>(&process, (ptr + mlp.offsets[i]) as *const c_void).unwrap();
+    }
+
+    ptr = ptr + (mlp.offsets[mlp.offsets.len() - 1] + mlp.struct_offset.unwrap_or(0));
+
+    return read::<T>(&process, ptr as *const c_void);
 }
 
 /// Write the specified buffer in the memory of the specified process at the specified address.
@@ -74,28 +132,6 @@ pub fn write_process_memory(
     };
 }
 
-/// Read the value at the specified address (ptr) from the process memory.
-///
-/// # Arguments
-/// process - The process to read from.
-/// ptr - The address to read from.
-///
-/// # Returns
-/// If the function succeeds, the return value is the value read from the specified process.
-pub fn read<T>(process: &Process, ptr: *const c_void) -> Result<T, u32> {
-    let mut buffer: T = unsafe { std::mem::zeroed() };
-    let size = std::mem::size_of::<T>();
-
-    let r_read_process_memory =
-        read_process_memory(process, ptr, &mut buffer as *mut T as *mut c_void, size);
-
-    return if r_read_process_memory.is_err() {
-        Err(r_read_process_memory.unwrap_err())
-    } else {
-        Ok(buffer)
-    };
-}
-
 /// Write the specified value in the memory of the specified process at the specified address.
 ///
 /// # Arguments
@@ -116,4 +152,33 @@ pub fn write<T>(process: &Process, ptr: *const c_void, value: T) -> Result<usize
     } else {
         Ok(r_write_process_memory.unwrap())
     };
+}
+
+/// Write the specified value at the specified multi-level pointer from the process memory.
+///
+/// # Arguments
+/// process - The process to write to.
+/// mlp - The multi-level pointer to write to.
+/// value - The value to write.
+///
+/// # Returns
+/// If the function succeeds, the return value is the number of bytes written in the specified process.
+pub fn write_multi_level_pointer<T>(
+    process: &Process,
+    mlp: &MultiLevelPointer,
+    value: T,
+) -> Result<usize, u32> {
+    let mut ptr = read::<usize>(
+        &process,
+        (process.module_handle + mlp.base_address) as *const c_void,
+    )
+    .unwrap();
+
+    for i in 0..mlp.offsets.len() - 1 {
+        ptr = read::<usize>(&process, (ptr + mlp.offsets[i]) as *const c_void).unwrap();
+    }
+
+    ptr = ptr + (mlp.offsets[mlp.offsets.len() - 1] + mlp.struct_offset.unwrap_or(0));
+
+    return write::<T>(&process, ptr as *const c_void, value);
 }

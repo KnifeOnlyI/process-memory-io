@@ -1,5 +1,3 @@
-use std::ffi::c_void;
-
 use crate::windows_api::constants::{PROCESS_QUERY_INFORMATION, PROCESS_VM_READ, PROCESS_VM_WRITE};
 
 mod handle;
@@ -15,19 +13,32 @@ fn main() {
     )
     .expect("Failed to get game process");
 
-    let ammo_ptr = 0x2402ABC4usize as *const c_void;
+    let player_stats_ptr = memory::MultiLevelPointer {
+        base_address: 0x0DBB88C0,
+        offsets: vec![0xA0, 0x40, 0x50, 0x1F0],
+        struct_offset: None,
+    };
 
-    let ammo_initial_qty =
-        memory::read::<i32>(&process, ammo_ptr).expect("Failed to read process memory");
+    let max_hp_ptr = memory::MultiLevelPointer {
+        base_address: player_stats_ptr.base_address,
+        offsets: player_stats_ptr.offsets.clone(),
+        struct_offset: Some(0),
+    };
 
-    println!("Ammo Initial Quantity: {}", ammo_initial_qty);
+    let hp_ptr = memory::MultiLevelPointer {
+        base_address: player_stats_ptr.base_address,
+        offsets: player_stats_ptr.offsets.clone(),
+        struct_offset: Some(0x4),
+    };
 
-    let ammo_new_qty = 9999;
+    let max_hp = memory::read_multi_level_pointer::<i32>(&process, &max_hp_ptr).unwrap();
+    let hp = memory::read_multi_level_pointer::<i32>(&process, &hp_ptr).unwrap();
 
-    memory::write(&process, ammo_ptr, ammo_new_qty).expect("Failed to write process memory");
+    println!("HP: {} / {}", hp, max_hp);
 
-    let ammo_new_qty =
-        memory::read::<i32>(&process, ammo_ptr).expect("Failed to read process memory");
+    memory::write_multi_level_pointer::<i32>(&process, &hp_ptr, max_hp).unwrap();
 
-    println!("Ammo New Quantity: {}", ammo_new_qty);
+    let hp = memory::read_multi_level_pointer::<i32>(&process, &hp_ptr).unwrap();
+
+    println!("NEW HP: {} / {}", hp, max_hp);
 }

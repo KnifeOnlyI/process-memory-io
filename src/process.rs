@@ -17,7 +17,10 @@ static DEFAULT_MAX_NB_PROCESSES: u32 = 1024;
 /// Represent a process running on the system.
 pub struct Process {
     /// A handle to the process.
-    pub(crate) handle: isize,
+    pub(crate) handle: usize,
+
+    /// A handle to the module.
+    pub(crate) module_handle: usize,
 
     /// The process identifier.
     pub(crate) pid: u32,
@@ -66,7 +69,7 @@ pub fn enumerate_pid(nb: u32) -> Result<Vec<u32>, u32> {
 ///
 /// # Returns
 /// If the function succeeds, the return value is true if the process is running under WOW64.
-pub fn is_64bit_process(process_handle: isize) -> Result<bool, u32> {
+pub fn is_64bit_process(process_handle: usize) -> Result<bool, u32> {
     let mut is_wow64 = false;
 
     let success = unsafe { IsWow64Process(process_handle, &mut is_wow64) };
@@ -86,7 +89,7 @@ pub fn is_64bit_process(process_handle: isize) -> Result<bool, u32> {
 ///
 /// # Returns
 /// If the function succeeds, the return value is a handle to the process.
-pub fn open(pid: u32, access: u32) -> Result<isize, u32> {
+pub fn open(pid: u32, access: u32) -> Result<usize, u32> {
     let handle = unsafe { OpenProcess(access, false, pid) };
 
     return if handle == 0 {
@@ -103,7 +106,7 @@ pub fn open(pid: u32, access: u32) -> Result<isize, u32> {
 ///
 /// # Returns
 /// If the function succeeds, the return value is an array of module handles.
-pub fn enum_modules(process_handle: isize) -> Result<isize, u32> {
+pub fn enum_modules(process_handle: usize) -> Result<usize, u32> {
     let r_is_64bits = is_64bit_process(process_handle);
 
     if r_is_64bits.is_err() {
@@ -117,7 +120,7 @@ pub fn enum_modules(process_handle: isize) -> Result<isize, u32> {
     };
 }
 
-pub fn get_module_base_name(process_handle: isize, module_handle: isize) -> Result<String, u32> {
+pub fn get_module_base_name(process_handle: usize, module_handle: usize) -> Result<String, u32> {
     let mut lp_base_name = [0; MAX_PATH];
     let n_size = lp_base_name.len() as u32;
 
@@ -159,7 +162,12 @@ pub fn get_process_by_name(
         return Err(r_all_pid.unwrap_err());
     }
 
-    let mut processes = Vec::new();
+    let mut process = Process {
+        handle: 0,
+        module_handle: 0,
+        pid: 0,
+        name: String::default(),
+    };
 
     for pid in r_all_pid.unwrap() {
         let r_handle = open(pid, PROCESS_QUERY_INFORMATION | PROCESS_VM_READ);
@@ -210,11 +218,10 @@ pub fn get_process_by_name(
                 return Err(unsafe { GetLastError() });
             }
 
-            processes.push(Process {
-                handle: r_handle.unwrap(),
-                pid,
-                name: process_name.clone(),
-            });
+            process.handle = r_handle.unwrap();
+            process.module_handle = h_module;
+            process.pid = pid;
+            process.name = process_name;
         } else if handle::close(handle).is_err() {
             println!(
                 "Failed to close process handle that not corresponding {}",
@@ -223,10 +230,10 @@ pub fn get_process_by_name(
         }
     }
 
-    return if processes.is_empty() {
+    return if process.handle == 0 {
         Err(0)
     } else {
-        Ok(processes.pop().unwrap())
+        Ok(process)
     };
 }
 
@@ -237,15 +244,15 @@ pub fn get_process_by_name(
 ///
 /// # Returns
 /// If the function succeeds, the return value is an array of module handles.
-fn enum_modules_32bits(process_handle: isize) -> Result<isize, u32> {
-    let mut lph_module = isize::default();
+fn enum_modules_32bits(process_handle: usize) -> Result<usize, u32> {
+    let mut lph_module = usize::default();
     let mut lpcb_needed = 0;
 
     let success = unsafe {
         EnumProcessModules(
             process_handle,
             &mut lph_module,
-            size_of::<isize>() as u32,
+            size_of::<usize>() as u32,
             &mut lpcb_needed,
         )
     };
@@ -264,15 +271,15 @@ fn enum_modules_32bits(process_handle: isize) -> Result<isize, u32> {
 ///
 /// # Returns
 /// If the function succeeds, the return value is an array of module handles.
-fn enum_modules_64bits(process_handle: isize) -> Result<isize, u32> {
-    let mut lph_module = isize::default();
+fn enum_modules_64bits(process_handle: usize) -> Result<usize, u32> {
+    let mut lph_module = usize::default();
     let mut lpcb_needed = 0;
 
     let success = unsafe {
         EnumProcessModulesEx(
             process_handle,
             &mut lph_module,
-            size_of::<isize>() as u32,
+            size_of::<usize>() as u32,
             &mut lpcb_needed,
             LIST_MODULES_ALL,
         )
