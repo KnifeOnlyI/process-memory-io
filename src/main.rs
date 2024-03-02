@@ -1,10 +1,13 @@
+mod handle;
+mod process;
 mod windows_api;
-pub mod process;
 
 fn main() {
-    let processes = process::enumerate_processes(None).unwrap();
+    let process = process::get_process_by_name("notepad.exe", None).unwrap();
 
-    for pid in processes {
-        println!("PID: {}", pid);
+    println!("NAME = \"{}\" / PID = {} / HANDLE = {}", process.name, process.pid, process.handle);
+
+    if handle::close(process.handle).is_err() {
+        println!("Failed to close process handle {}", process.name);
     }
 }
