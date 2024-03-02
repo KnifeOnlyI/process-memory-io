@@ -28,8 +28,6 @@ pub struct Process {
 
 impl Drop for Process {
     fn drop(&mut self) {
-        println!("Drop process");
-
         if handle::close(self.handle).is_err() {
             println!(
                 "Failed to close process handle (probably already closed) {}",
