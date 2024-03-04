@@ -2,7 +2,7 @@ use std::ffi::c_void;
 
 use crate::process::Process;
 use crate::windows_api::errhandlingapi::GetLastError;
-use crate::windows_api::memoryapi::{ReadProcessMemory, WriteProcessMemory};
+use crate::windows_api::memoryapi::{ReadProcessMemory, VirtualAllocEx, WriteProcessMemory};
 
 /// Represent a multi-level pointer.
 ///
@@ -181,4 +181,37 @@ pub fn write_multi_level_pointer<T>(
     ptr = ptr + (mlp.offsets[mlp.offsets.len() - 1] + mlp.struct_offset.unwrap_or(0));
 
     return write::<T>(&process, ptr as *const c_void, value);
+}
+
+/// Allocate memory in the specified process.
+///
+/// # Arguments
+/// process - The process to allocate memory in.
+/// size - The size of the memory to allocate.
+/// fl_allocation_type - The type of memory allocation.
+/// fl_protect - The memory protection for the region of pages to be allocated
+///
+/// # Returns
+/// If the function succeeds, the return value is the base address of the allocated memory.
+pub fn allocate_memory(
+    process: &Process,
+    size: usize,
+    fl_allocation_type: u32,
+    fl_protect: u32,
+) -> Result<*const c_void, u32> {
+    let lp_base_address = unsafe {
+        VirtualAllocEx(
+            process.handle,
+            std::ptr::null(),
+            size,
+            fl_allocation_type,
+            fl_protect,
+        )
+    };
+
+    return if lp_base_address.is_null() {
+        Err(unsafe { GetLastError() })
+    } else {
+        Ok(lp_base_address)
+    };
 }

@@ -21,4 +21,13 @@ extern "C" {
         n_size: usize,
         lp_number_of_bytes_written: *mut usize,
     ) -> bool;
+
+    /// https://learn.microsoft.com/en-us/windows/win32/api/memoryapi/nf-memoryapi-virtualallocex
+    pub fn VirtualAllocEx(
+        h_process: usize,
+        lp_address: *const c_void,
+        dw_size: usize,
+        fl_allocation_type: u32,
+        fl_protect: u32,
+    ) -> *const c_void;
 }

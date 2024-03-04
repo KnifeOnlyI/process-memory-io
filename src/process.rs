@@ -1,3 +1,4 @@
+use std::ffi::c_void;
 use std::mem::size_of;
 
 use crate::handle;
@@ -5,7 +6,7 @@ use crate::windows_api::constants::{
     DWORD_SIZE, LIST_MODULES_ALL, MAX_PATH, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ,
 };
 use crate::windows_api::errhandlingapi::GetLastError;
-use crate::windows_api::processthreadsapi::OpenProcess;
+use crate::windows_api::processthreadsapi::{CreateRemoteThread, OpenProcess};
 use crate::windows_api::psapi::{
     EnumProcessModules, EnumProcessModulesEx, EnumProcesses, GetModuleBaseNameW,
 };
@@ -17,7 +18,7 @@ static DEFAULT_MAX_NB_PROCESSES: u32 = 1024;
 /// Represent a process running on the system.
 pub struct Process {
     /// A handle to the process.
-    pub(crate) handle: usize,
+    pub handle: usize,
 
     /// A handle to the module.
     pub module_handle: usize,
@@ -234,6 +235,30 @@ pub fn get_process_by_name(
         Err(0)
     } else {
         Ok(process)
+    };
+}
+
+pub fn create_remote_thread(
+    process: &Process,
+    lp_start_address: *const c_void,
+    lp_parameter: *const c_void,
+) -> Result<usize, u32> {
+    let thread_handle = unsafe {
+        CreateRemoteThread(
+            process.handle,
+            std::ptr::null(),
+            0,
+            lp_start_address,
+            lp_parameter,
+            0,
+            std::ptr::null(),
+        )
+    };
+
+    return if thread_handle == 0 {
+        Err(unsafe { GetLastError() })
+    } else {
+        Ok(thread_handle)
     };
 }
 

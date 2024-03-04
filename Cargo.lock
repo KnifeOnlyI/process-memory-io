@@ -3,5 +3,5 @@
 version = 3
 
 [[package]]
-name = "koi-wapi"
+name = "wapi"
 version = "1.0.0"
