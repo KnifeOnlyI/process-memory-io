@@ -20,13 +20,13 @@ pub struct Process {
     pub(crate) handle: usize,
 
     /// A handle to the module.
-    pub(crate) module_handle: usize,
+    pub module_handle: usize,
 
     /// The process identifier.
-    pub(crate) pid: u32,
+    pub pid: u32,
 
     /// The name of the process.
-    pub(crate) name: String,
+    pub name: String,
 }
 
 impl Drop for Process {
