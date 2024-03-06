@@ -6,6 +6,7 @@ use crate::windows_api::constants::{
     DWORD_SIZE, LIST_MODULES_ALL, MAX_PATH, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ,
 };
 use crate::windows_api::errhandlingapi::GetLastError;
+use crate::windows_api::libloaderapi::GetModuleFileNameExA;
 use crate::windows_api::processthreadsapi::{CreateRemoteThread, OpenProcess};
 use crate::windows_api::psapi::{
     EnumProcessModules, EnumProcessModulesEx, EnumProcesses, GetModuleBaseNameW,
@@ -260,6 +261,31 @@ pub fn create_remote_thread(
     } else {
         Ok(thread_handle)
     };
+}
+
+/// Retrieves the main module full path of the specified process.
+///
+/// # Arguments
+/// process - A handle to the process that contains the module.
+///
+/// # Returns
+/// If the function succeeds, the return value is the full path of the module.
+pub fn get_full_path(process: &Process) -> Result<String, u32> {
+    let mut buffer = [0u8; 1024];
+    let size = unsafe {
+        GetModuleFileNameExA(
+            process.handle,
+            process.module_handle,
+            buffer.as_mut_ptr() as *mut c_void,
+            buffer.len() as u32,
+        )
+    };
+
+    if size == 0 {
+        Err(unsafe { GetLastError() })
+    } else {
+        Ok(String::from_utf8_lossy(&buffer[0..size as usize]).to_string())
+    }
 }
 
 /// Enumerates the modules associated with the specified process (32 bits).
