@@ -10,5 +10,3 @@ pub static LIST_MODULES_ALL: u32 = 0x03;
 
 pub static MEM_COMMIT: u32 = 0x1000;
 pub static PAGE_EXECUTE_READWRITE: u32 = 0x40;
-
-pub const MAX_PATH: usize = 260;

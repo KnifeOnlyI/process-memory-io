@@ -1,17 +1,20 @@
 use std::ffi::c_void;
 use std::mem::size_of;
 
-use crate::handle;
-use crate::windows_api::constants::{
-    DWORD_SIZE, LIST_MODULES_ALL, MAX_PATH, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ,
-};
-use crate::windows_api::errhandlingapi::GetLastError;
-use crate::windows_api::libloaderapi::GetModuleFileNameExA;
-use crate::windows_api::processthreadsapi::{CreateRemoteThread, OpenProcess};
-use crate::windows_api::psapi::{
+use windows::core::imp::FARPROC;
+use windows::core::Error;
+use windows::Win32::Foundation::{BOOL, HANDLE, HMODULE, MAX_PATH};
+use windows::Win32::System::ProcessStatus::{
     EnumProcessModules, EnumProcessModulesEx, EnumProcesses, GetModuleBaseNameW,
+    GetModuleFileNameExA, ENUM_PROCESS_MODULES_EX_FLAGS,
 };
-use crate::windows_api::wow64apiset::IsWow64Process;
+use windows::Win32::System::Threading::{
+    CreateRemoteThread, IsWow64Process, OpenProcess, PROCESS_ACCESS_RIGHTS,
+    PROCESS_QUERY_INFORMATION, PROCESS_VM_READ,
+};
+
+use crate::handle;
+use crate::windows_api::constants::{DWORD_SIZE, LIST_MODULES_ALL};
 
 /// The default maximum number of processes that can be enumerated.
 static DEFAULT_MAX_NB_PROCESSES: u32 = 1024;
@@ -19,27 +22,16 @@ static DEFAULT_MAX_NB_PROCESSES: u32 = 1024;
 /// Represent a process running on the system.
 pub struct Process {
     /// A handle to the process.
-    pub handle: usize,
+    pub handle: HANDLE,
 
     /// A handle to the module.
-    pub module_handle: usize,
+    pub module_handle: HMODULE,
 
     /// The process identifier.
     pub pid: u32,
 
     /// The name of the process.
     pub name: String,
-}
-
-impl Drop for Process {
-    fn drop(&mut self) {
-        if handle::close(self.handle).is_err() {
-            println!(
-                "Failed to close process handle (probably already closed) {}",
-                self.pid
-            );
-        }
-    }
 }
 
 /// Enumerates PID of running processes on the system.
@@ -49,18 +41,18 @@ impl Drop for Process {
 ///
 /// # Returns
 /// If the function succeeds, the return value is a list of process identifiers.
-pub fn enumerate_pid(nb: u32) -> Result<Vec<u32>, u32> {
+pub fn enumerate_pid(nb: u32) -> Result<Vec<u32>, Error> {
     let mut lpid_process = Vec::with_capacity(nb as usize);
     let mut lpcb_needed = 0;
 
-    let success = unsafe { EnumProcesses(lpid_process.as_mut_ptr(), nb, &mut lpcb_needed) };
+    let result = unsafe { EnumProcesses(lpid_process.as_mut_ptr(), nb, &mut lpcb_needed) };
 
-    return if !success {
-        Err(unsafe { GetLastError() })
+    return if result.is_err() {
+        Err(result.unwrap_err())
     } else {
         unsafe { lpid_process.set_len((lpcb_needed / DWORD_SIZE) as usize) };
 
-        return Ok(lpid_process);
+        Ok(lpid_process)
     };
 }
 
@@ -71,13 +63,13 @@ pub fn enumerate_pid(nb: u32) -> Result<Vec<u32>, u32> {
 ///
 /// # Returns
 /// If the function succeeds, the return value is true if the process is running under WOW64.
-pub fn is_64bit_process(process_handle: usize) -> Result<bool, u32> {
-    let mut is_wow64 = false;
+pub fn is_64bit_process(process_handle: HANDLE) -> Result<BOOL, Error> {
+    let mut is_wow64 = BOOL::from(false);
 
-    let success = unsafe { IsWow64Process(process_handle, &mut is_wow64) };
+    let result = unsafe { IsWow64Process(process_handle, &mut is_wow64) };
 
-    return if !success {
-        Err(unsafe { GetLastError() })
+    return if result.is_err() {
+        Err(result.unwrap_err())
     } else {
         Ok(is_wow64)
     };
@@ -91,13 +83,13 @@ pub fn is_64bit_process(process_handle: usize) -> Result<bool, u32> {
 ///
 /// # Returns
 /// If the function succeeds, the return value is a handle to the process.
-pub fn open(pid: u32, access: u32) -> Result<usize, u32> {
+pub fn open(pid: u32, access: PROCESS_ACCESS_RIGHTS) -> Result<HANDLE, Error> {
     let handle = unsafe { OpenProcess(access, false, pid) };
 
-    return if handle == 0 {
-        Err(unsafe { GetLastError() })
+    return if handle.is_err() {
+        Err(handle.unwrap_err())
     } else {
-        Ok(handle)
+        Ok(handle.unwrap())
     };
 }
 
@@ -108,39 +100,32 @@ pub fn open(pid: u32, access: u32) -> Result<usize, u32> {
 ///
 /// # Returns
 /// If the function succeeds, the return value is an array of module handles.
-pub fn enum_modules(process_handle: usize) -> Result<usize, u32> {
-    let r_is_64bits = is_64bit_process(process_handle);
+pub fn enum_modules(process_handle: HANDLE) -> Result<HMODULE, Error> {
+    let result = is_64bit_process(process_handle);
 
-    if r_is_64bits.is_err() {
-        return Err(r_is_64bits.unwrap_err());
+    if result.is_err() {
+        return Err(result.unwrap_err());
     }
 
-    return if r_is_64bits.unwrap() {
+    return if result.unwrap().as_bool() {
         enum_modules_64bits(process_handle)
     } else {
         enum_modules_32bits(process_handle)
     };
 }
 
-pub fn get_module_base_name(process_handle: usize, module_handle: usize) -> Result<String, u32> {
-    let mut lp_base_name = [0; MAX_PATH];
-    let n_size = lp_base_name.len() as u32;
+pub fn get_module_base_name(
+    process_handle: HANDLE,
+    module_handle: HMODULE,
+) -> Result<String, Error> {
+    let mut lp_base_name = [0; MAX_PATH as usize];
 
-    let module_base_name_length = unsafe {
-        GetModuleBaseNameW(
-            process_handle,
-            module_handle,
-            lp_base_name.as_mut_ptr(),
-            n_size,
-        )
-    };
+    let result = unsafe { GetModuleBaseNameW(process_handle, module_handle, &mut lp_base_name) };
 
-    return if module_base_name_length == 0 {
-        Err(unsafe { GetLastError() })
+    return if result == 0 {
+        Err(Error::from_win32())
     } else {
-        Ok(String::from_utf16_lossy(
-            &lp_base_name[0..module_base_name_length as usize],
-        ))
+        Ok(String::from_utf16_lossy(&lp_base_name[0..result as usize]))
     };
 }
 
@@ -157,16 +142,16 @@ pub fn get_process_by_name(
     name: &str,
     max_search_size: Option<u32>,
     access: u32,
-) -> Result<Process, u32> {
+) -> Result<Process, Error> {
     let r_all_pid = enumerate_pid(max_search_size.unwrap_or(DEFAULT_MAX_NB_PROCESSES));
 
     if r_all_pid.is_err() {
-        return Err(r_all_pid.unwrap_err());
+        return Err(Error::from_win32());
     }
 
     let mut process = Process {
-        handle: 0,
-        module_handle: 0,
+        handle: HANDLE::default(),
+        module_handle: HMODULE::default(),
         pid: 0,
         name: String::default(),
     };
@@ -213,11 +198,11 @@ pub fn get_process_by_name(
                 println!("Failed to close corresponding process before re-open it with desired access {}", pid);
             }
 
-            let r_handle = open(pid, access);
+            let r_handle = open(pid, PROCESS_ACCESS_RIGHTS(access));
 
             if r_handle.is_err() {
                 println!("Failed to re-open process with desired access {}", pid);
-                return Err(unsafe { GetLastError() });
+                return Err(r_handle.unwrap_err());
             }
 
             process.handle = r_handle.unwrap();
@@ -232,34 +217,41 @@ pub fn get_process_by_name(
         }
     }
 
-    return if process.handle == 0 {
-        Err(0)
+    return if process.handle.is_invalid() {
+        Err(Error::from_win32())
     } else {
         Ok(process)
     };
 }
 
+/// Create a new thread that runs in the virtual address space of another process.
+///
+/// # Arguments
+/// process - A handle to the process in which the thread is to be created.
+/// lp_start_address - A pointer to the application-defined function of type LPTHREAD_START_ROUTINE to be executed by the thread.
+/// lp_parameter - A pointer to a variable to be passed to the thread.
+///
+/// # Returns
+/// If the function succeeds, the return value is the handle to the new thread.
 pub fn create_remote_thread(
     process: &Process,
-    lp_start_address: *const c_void,
+    lp_start_address: FARPROC,
     lp_parameter: *const c_void,
-) -> Result<usize, u32> {
-    let thread_handle = unsafe {
+) -> Result<HANDLE, Error> {
+    let thread_start_routine: Option<
+        unsafe extern "system" fn(lpthreadparameter: *mut c_void) -> u32,
+    > = lp_start_address.map(|f| unsafe { std::mem::transmute(f) });
+
+    return unsafe {
         CreateRemoteThread(
             process.handle,
-            std::ptr::null(),
+            None,
             0,
-            lp_start_address,
-            lp_parameter,
+            thread_start_routine,
+            Some(lp_parameter),
             0,
-            std::ptr::null(),
+            None,
         )
-    };
-
-    return if thread_handle == 0 {
-        Err(unsafe { GetLastError() })
-    } else {
-        Ok(thread_handle)
     };
 }
 
@@ -270,22 +262,15 @@ pub fn create_remote_thread(
 ///
 /// # Returns
 /// If the function succeeds, the return value is the full path of the module.
-pub fn get_full_path(process: &Process) -> Result<String, u32> {
+pub fn get_full_path(process: &Process) -> Result<String, Error> {
     let mut buffer = [0u8; 1024];
-    let size = unsafe {
-        GetModuleFileNameExA(
-            process.handle,
-            process.module_handle,
-            buffer.as_mut_ptr() as *mut c_void,
-            buffer.len() as u32,
-        )
-    };
+    let size = unsafe { GetModuleFileNameExA(process.handle, process.module_handle, &mut buffer) };
 
-    if size == 0 {
-        Err(unsafe { GetLastError() })
+    return if size == 0 {
+        Err(Error::from_win32())
     } else {
         Ok(String::from_utf8_lossy(&buffer[0..size as usize]).to_string())
-    }
+    };
 }
 
 /// Enumerates the modules associated with the specified process (32 bits).
@@ -295,11 +280,11 @@ pub fn get_full_path(process: &Process) -> Result<String, u32> {
 ///
 /// # Returns
 /// If the function succeeds, the return value is an array of module handles.
-fn enum_modules_32bits(process_handle: usize) -> Result<usize, u32> {
-    let mut lph_module = usize::default();
+fn enum_modules_32bits(process_handle: HANDLE) -> Result<HMODULE, Error> {
+    let mut lph_module = HMODULE::default();
     let mut lpcb_needed = 0;
 
-    let success = unsafe {
+    let result = unsafe {
         EnumProcessModules(
             process_handle,
             &mut lph_module,
@@ -308,8 +293,8 @@ fn enum_modules_32bits(process_handle: usize) -> Result<usize, u32> {
         )
     };
 
-    return if !success {
-        Err(unsafe { GetLastError() })
+    return if result.is_err() {
+        Err(result.unwrap_err())
     } else {
         Ok(lph_module)
     };
@@ -322,22 +307,22 @@ fn enum_modules_32bits(process_handle: usize) -> Result<usize, u32> {
 ///
 /// # Returns
 /// If the function succeeds, the return value is an array of module handles.
-fn enum_modules_64bits(process_handle: usize) -> Result<usize, u32> {
-    let mut lph_module = usize::default();
+fn enum_modules_64bits(process_handle: HANDLE) -> Result<HMODULE, Error> {
+    let mut lph_module = HMODULE::default();
     let mut lpcb_needed = 0;
 
-    let success = unsafe {
+    let result = unsafe {
         EnumProcessModulesEx(
             process_handle,
             &mut lph_module,
             size_of::<usize>() as u32,
             &mut lpcb_needed,
-            LIST_MODULES_ALL,
+            ENUM_PROCESS_MODULES_EX_FLAGS(LIST_MODULES_ALL),
         )
     };
 
-    return if !success {
-        Err(unsafe { GetLastError() })
+    return if result.is_err() {
+        Err(result.unwrap_err())
     } else {
         Ok(lph_module)
     };

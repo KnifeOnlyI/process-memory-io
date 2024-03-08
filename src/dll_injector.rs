@@ -1,5 +1,8 @@
 use std::ffi::c_void;
 
+use windows::core::Error;
+use windows::Win32::System::Memory::{PAGE_PROTECTION_FLAGS, VIRTUAL_ALLOCATION_TYPE};
+
 use crate::memory::{allocate_memory, write_process_memory};
 use crate::process::{create_remote_thread, Process};
 use crate::system::{get_proc_address, load_library};
@@ -13,15 +16,15 @@ use crate::windows_api::constants::{MEM_COMMIT, PAGE_EXECUTE_READWRITE};
 ///
 /// # Returns
 /// If the function succeeds, the return value is Ok(()).
-pub fn inject_dll(process: &Process, dll_path: &str) -> Result<(), u32> {
+pub fn inject_dll(process: &Process, dll_path: &str) -> Result<(), Error> {
     let dll_path = std::ffi::CString::new(dll_path).unwrap();
     let dll_path_nb_bytes = dll_path.to_bytes().len() + 1;
 
     let r_remote_memory = allocate_memory(
         process,
         dll_path_nb_bytes,
-        MEM_COMMIT,
-        PAGE_EXECUTE_READWRITE,
+        VIRTUAL_ALLOCATION_TYPE(MEM_COMMIT),
+        PAGE_PROTECTION_FLAGS(PAGE_EXECUTE_READWRITE),
     );
 
     if r_remote_memory.is_err() {
@@ -45,7 +48,7 @@ pub fn inject_dll(process: &Process, dll_path: &str) -> Result<(), u32> {
         return Err(r_kernel32.unwrap_err());
     }
 
-    let r_load_library_a_addr = get_proc_address(r_kernel32.unwrap(), "LoadLibraryA");
+    let r_load_library_a_addr = get_proc_address(r_kernel32.unwrap().0, "LoadLibraryA");
 
     if r_load_library_a_addr.is_err() {
         return Err(r_load_library_a_addr.unwrap_err());
@@ -53,9 +56,9 @@ pub fn inject_dll(process: &Process, dll_path: &str) -> Result<(), u32> {
 
     let r_thread = create_remote_thread(process, r_load_library_a_addr.unwrap(), remote_memory);
 
-    if r_thread.is_err() {
-        return Err(r_thread.unwrap_err());
-    }
-
-    Ok(())
+    return if r_thread.is_err() {
+        Err(r_thread.unwrap_err())
+    } else {
+        Ok(())
+    };
 }
