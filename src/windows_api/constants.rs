@@ -1,6 +1,5 @@
 pub static DWORD_SIZE: u32 = 4;
 
-pub static PROCESS_ALL_ACCESS: u32 = 0x1F0FFF;
 pub static PROCESS_VM_READ: u32 = 0x0010;
 pub static PROCESS_VM_WRITE: u32 = 0x0020;
 pub static PROCESS_VM_OPERATION: u32 = 0x0008;
