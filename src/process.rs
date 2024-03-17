@@ -1,6 +1,7 @@
 use std::ffi::c_void;
 use std::mem::size_of;
 
+use sha2::Digest;
 use windows::core::imp::FARPROC;
 use windows::core::Error;
 use windows::Win32::Foundation::{BOOL, HANDLE, HMODULE, MAX_PATH};
@@ -253,6 +254,19 @@ pub fn create_remote_thread(
             None,
         )
     };
+}
+
+pub fn get_hash(process: &Process) -> Result<Vec<u8>, Error> {
+    let process_path = get_full_path(&process)?;
+    let process_file = std::fs::read(process_path)?;
+
+    let mut hasher = sha2::Sha256::new();
+
+    hasher.update(process_file);
+
+    let binding = hasher.finalize();
+
+    return Ok(binding.to_vec());
 }
 
 /// Retrieves the main module full path of the specified process.

@@ -17,7 +17,58 @@ use crate::process::Process;
 pub struct MultiLevelPointer {
     pub base_address: usize,
     pub offsets: Vec<usize>,
-    pub struct_offset: Option<usize>,
+}
+
+impl MultiLevelPointer {
+    /// Create a new multi-level pointer from another by adding the specified offsets.
+    ///
+    /// # Arguments
+    /// multi_level_pointer - The original multi-level pointer to copy
+    /// offsets - The list of offsets to add to the new multi-level pointer
+    ///
+    /// # Returns
+    /// The created multi-level pointer
+    pub fn from(multi_level_pointer: &MultiLevelPointer, offsets: Vec<usize>) -> MultiLevelPointer {
+        let mut new_offsets = multi_level_pointer.offsets.clone();
+
+        new_offsets.extend(offsets);
+
+        MultiLevelPointer {
+            base_address: multi_level_pointer.base_address,
+            offsets: new_offsets,
+        }
+    }
+
+    /// Read the value of specified type pointed by the multi-level pointer.
+    ///
+    /// # Arguments
+    /// self - The multi-level pointer to read
+    /// process - The process that contains the pointed value to read
+    /// offset - The last offset to apply to read the value
+    ///
+    /// # Returns
+    /// If the function succeeds, the return value is the read value
+    pub fn read<T>(self: &MultiLevelPointer, process: &Process, offset: usize) -> Result<T, Error> {
+        read_multi_level_pointer::<T>(&process, self, offset)
+    }
+
+    /// Write the specified value at the pointed memory by the multi-level pointer.
+    ///
+    /// # Arguments
+    /// self - The multi-level pointer to read
+    /// process - The process that contains the pointed memory to write
+    /// offset - The last offset to apply to write the value
+    ///
+    /// # Returns
+    /// If the function succeeds, the return value is the number of bytes written
+    pub fn write<T>(
+        self: &MultiLevelPointer,
+        process: &Process,
+        offset: usize,
+        value: T,
+    ) -> Result<usize, Error> {
+        write_multi_level_pointer::<T>(&process, self, offset, value)
+    }
 }
 
 /// Read value at the specified address (ptr) from the process memory.
@@ -38,21 +89,17 @@ pub fn read_process_memory(
 ) -> Result<usize, Error> {
     let mut lp_number_of_bytes_read = 0;
 
-    let result = unsafe {
+    unsafe {
         ReadProcessMemory(
             process.handle,
             ptr,
             buffer,
             size,
             Some(&mut lp_number_of_bytes_read),
-        )
+        )?
     };
 
-    return if result.is_err() {
-        Err(result.unwrap_err())
-    } else {
-        Ok(lp_number_of_bytes_read)
-    };
+    Ok(lp_number_of_bytes_read)
 }
 
 /// Read the value at the specified address (ptr) from the process memory.
@@ -67,13 +114,9 @@ pub fn read<T>(process: &Process, ptr: *const c_void) -> Result<T, Error> {
     let mut buffer: T = unsafe { std::mem::zeroed() };
     let size = std::mem::size_of::<T>();
 
-    let result = read_process_memory(process, ptr, &mut buffer as *mut T as *mut c_void, size);
+    read_process_memory(process, ptr, &mut buffer as *mut T as *mut c_void, size)?;
 
-    return if result.is_err() {
-        Err(result.unwrap_err())
-    } else {
-        Ok(buffer)
-    };
+    Ok(buffer)
 }
 
 /// Read the value at the specified multi-level pointer from the process memory.
@@ -81,21 +124,25 @@ pub fn read<T>(process: &Process, ptr: *const c_void) -> Result<T, Error> {
 /// # Arguments
 /// process - The process to read from.
 /// mlp - The multi-level pointer to read from.
+/// offset - The last offset to apply to read the value
 ///
 /// # Returns
 /// If the function succeeds, the return value is the value read from the specified process.
-pub fn read_multi_level_pointer<T>(process: &Process, mlp: &MultiLevelPointer) -> Result<T, Error> {
+pub fn read_multi_level_pointer<T>(
+    process: &Process,
+    mlp: &MultiLevelPointer,
+    offset: usize,
+) -> Result<T, Error> {
     let mut ptr = read::<usize>(
         &process,
         (process.module_handle.0 + mlp.base_address as isize) as *const c_void,
-    )
-    .unwrap();
+    )?;
 
     for i in 0..mlp.offsets.len() - 1 {
-        ptr = read::<usize>(&process, (ptr + mlp.offsets[i]) as *const c_void).unwrap();
+        ptr = read::<usize>(&process, (ptr + mlp.offsets[i]) as *const c_void)?;
     }
 
-    ptr = ptr + (mlp.offsets[mlp.offsets.len() - 1] + mlp.struct_offset.unwrap_or(0));
+    ptr = ptr + (mlp.offsets[mlp.offsets.len() - 1] + offset);
 
     return read::<T>(&process, ptr as *const c_void);
 }
@@ -118,21 +165,17 @@ pub fn write_process_memory(
 ) -> Result<usize, Error> {
     let mut lp_number_of_bytes_written = 0;
 
-    let result = unsafe {
+    unsafe {
         WriteProcessMemory(
             process.handle,
             ptr,
             buffer,
             size,
             Some(&mut lp_number_of_bytes_written),
-        )
+        )?
     };
 
-    return if result.is_err() {
-        Err(result.unwrap_err())
-    } else {
-        Ok(lp_number_of_bytes_written)
-    };
+    Ok(lp_number_of_bytes_written)
 }
 
 /// Write the specified value in the memory of the specified process at the specified address.
@@ -147,13 +190,9 @@ pub fn write_process_memory(
 pub fn write<T>(process: &Process, ptr: *const c_void, value: T) -> Result<usize, Error> {
     let size = std::mem::size_of::<T>();
 
-    let result = write_process_memory(process, ptr, &value as *const T as *const c_void, size);
+    let result = write_process_memory(process, ptr, &value as *const T as *const c_void, size)?;
 
-    return if result.is_err() {
-        Err(result.unwrap_err())
-    } else {
-        Ok(result.unwrap())
-    };
+    Ok(result)
 }
 
 /// Write the specified value at the specified multi-level pointer from the process memory.
@@ -161,6 +200,7 @@ pub fn write<T>(process: &Process, ptr: *const c_void, value: T) -> Result<usize
 /// # Arguments
 /// process - The process to write to.
 /// mlp - The multi-level pointer to write to.
+/// offset - The last offset to apply to write the value
 /// value - The value to write.
 ///
 /// # Returns
@@ -168,19 +208,19 @@ pub fn write<T>(process: &Process, ptr: *const c_void, value: T) -> Result<usize
 pub fn write_multi_level_pointer<T>(
     process: &Process,
     mlp: &MultiLevelPointer,
+    offset: usize,
     value: T,
 ) -> Result<usize, Error> {
     let mut ptr = read::<usize>(
         &process,
         (process.module_handle.0 + mlp.base_address as isize) as *const c_void,
-    )
-    .unwrap();
+    )?;
 
     for i in 0..mlp.offsets.len() - 1 {
-        ptr = read::<usize>(&process, (ptr + mlp.offsets[i]) as *const c_void).unwrap();
+        ptr = read::<usize>(&process, (ptr + mlp.offsets[i]) as *const c_void)?;
     }
 
-    ptr = ptr + (mlp.offsets[mlp.offsets.len() - 1] + mlp.struct_offset.unwrap_or(0));
+    ptr = ptr + (mlp.offsets[mlp.offsets.len() - 1] + offset);
 
     return write::<T>(&process, ptr as *const c_void, value);
 }

@@ -7,6 +7,9 @@ edition = "2021"
 crate-type = ["rlib"]
 name = "wapi"
 
+[dependencies]
+sha2 = "0.10.8"
+
 [dependencies.windows]
 version = "0.54.0"
 features = [
