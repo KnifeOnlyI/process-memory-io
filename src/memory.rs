@@ -138,11 +138,15 @@ pub fn read_multi_level_pointer<T>(
         (process.module_handle.0 + mlp.base_address as isize) as *const c_void,
     )?;
 
-    for i in 0..mlp.offsets.len() - 1 {
-        ptr = read::<usize>(&process, (ptr + mlp.offsets[i]) as *const c_void)?;
-    }
+    if mlp.offsets.len() == 0 {
+        ptr = ptr + offset;
+    } else {
+        for i in 0..mlp.offsets.len() - 1 {
+            ptr = read::<usize>(&process, (ptr + mlp.offsets[i]) as *const c_void)?;
+        }
 
-    ptr = ptr + (mlp.offsets[mlp.offsets.len() - 1] + offset);
+        ptr = ptr + (mlp.offsets[mlp.offsets.len() - 1] + offset);
+    }
 
     return read::<T>(&process, ptr as *const c_void);
 }
@@ -216,11 +220,15 @@ pub fn write_multi_level_pointer<T>(
         (process.module_handle.0 + mlp.base_address as isize) as *const c_void,
     )?;
 
-    for i in 0..mlp.offsets.len() - 1 {
-        ptr = read::<usize>(&process, (ptr + mlp.offsets[i]) as *const c_void)?;
-    }
+    if mlp.offsets.len() == 0 {
+        ptr = ptr + offset;
+    } else {
+        for i in 0..mlp.offsets.len() - 1 {
+            ptr = read::<usize>(&process, (ptr + mlp.offsets[i]) as *const c_void)?;
+        }
 
-    ptr = ptr + (mlp.offsets[mlp.offsets.len() - 1] + offset);
+        ptr = ptr + (mlp.offsets[mlp.offsets.len() - 1] + offset);
+    }
 
     return write::<T>(&process, ptr as *const c_void, value);
 }
